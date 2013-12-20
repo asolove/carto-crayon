@@ -20,13 +20,6 @@
   [m]
   (assoc m :id (guid)))
 
-(defn- fetch-comments
-  "The comments need to be a vector, not a list. Not sure why."
-  [app opts]
-  (go (let [{{cs :comments} :body} {:body {:comments []}}]
-        (om/update!
-         app #(assoc % :comments (vec (map with-id cs)))))))
-
 (defn- value-from-node
   [owner field]
   (let [n (om/get-node owner field)
@@ -42,7 +35,9 @@
 ;; Components
 
 (def app-state
-  (atom {:comments []}))
+  (atom {:selection {:layer "States"}
+         :layers [{:name "Districts" :features [{:id "CA-1" :Obama 10 :Romney 20}]}
+                  {:name "States" :features [{:id "MN" :Obama 10 :Romney 14}]}]}))
 
 (defn comment
   "Having some trouble getting the markdown to display properly. I've
@@ -106,13 +101,60 @@
        (om/build comment-list app)
        (om/build comment-form app {:opts opts})))))
 
-(defn tutorial-app [app]
+(defn get-layer [app name]
+  (first (filter #(= name (:name %)) (:layers app))))
+
+(defn columns [features]
+  (into #{} (apply concat (map keys features))))
+
+(defn feature-row [feature cols]
+  (dom/tr nil
+          (into-array (map #(dom/td nil (feature %)) cols))))
+
+(defn feature-table [app options]
+  (let [layer (get-layer app (:layer (:selection app)))
+        features (:features layer)
+        cols (columns features)]
+    (om/component
+      (dom/div #js {:id "features"}
+               (dom/h2 nil "Features")
+               (dom/table nil
+                          (dom/thead nil (dom/tr nil
+                                                 (into-array
+                                                   (map #(dom/th nil (name %)) cols))))
+                          (dom/tbody nil (into-array
+                                           (map #(feature-row % cols) features))))))))
+
+(defn select-layer [app layer]
+  (om/update! app [:selection :layer]
+              (constantly layer)))
+
+(defn layer
+  [app {{:keys [name]} :layer}]
+  (let [selected (= name (:layer (:selection app)))]
+    (om/component
+      (dom/li #js {:className (when selected "selected") :onClick #(select-layer app name)} name))))
+
+(defn layer-list [app]
+  (om/component
+    (dom/div #js {:id "layers"}
+             (dom/h2 nil "Layers")
+             (dom/ol nil (into-array
+                           (map #(om/build layer app {:opts {:layer %}})
+                                (:layers app)))))))
+
+(defn carto-crayon-ui [app]
   (reify
     om/IRender
     (render [_ owner]
-      (dom/div nil
-               (om/build comment-box app
-                         {:opts {:poll-interval 2000
-                                 :url "/comments"}})))))
+      (dom/div nil nil
+               (dom/header #js {:className "auth"})
+               (dom/div #js {:id "data"}
+                        (om/build layer-list app)
+                        (om/build feature-table app)
+                        (dom/div #js {:id "styles"}
+                                 (dom/h2 nil "Styles")))
+               (dom/div #js {:id "map"}
+                        (dom/h2 nil "Map"))))))
 
-(om/root app-state tutorial-app (.getElementById js/document "content"))
+(om/root app-state carto-crayon-ui (.getElementById js/document "app"))
