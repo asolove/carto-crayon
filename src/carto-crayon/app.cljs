@@ -14,98 +14,25 @@
 (enable-console-print!)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Util
-
-(defn- with-id
-  [m]
-  (assoc m :id (guid)))
-
-(defn- value-from-node
-  [owner field]
-  (let [n (om/get-node owner field)
-        v (-> n .-value clojure.string/trim)]
-    (when-not (empty? v)
-      [v n])))
-
-(defn- clear-nodes!
-  [& nodes]
-  (doall (map #(set! (.-value %) "") nodes)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Components
+;; Data
 
 (def app-state
   (atom {:selection {:layer "States"}
          :layers [{:name "Districts" :features [{:id "CA-1" :Obama 10 :Romney 20}]}
                   {:name "States" :features [{:id "MN" :Obama 10 :Romney 14}]}]}))
 
-(defn comment
-  "Having some trouble getting the markdown to display properly. I've
-   tried with:
-
-    (dom/span {:dangerouslySetInnerHTML (js-obj {:__html raw-markup})})
-
-   and other variants...but haven't gotten anywhere."
-
-  [{:keys [author text] :as c} opts]
-  (om/component
-   (let [raw-markup (md/mdToHtml text)]
-     (dom/div #js {:className "comment"}
-              (dom/h2 #js {:className "commentAuthor"} author)
-              raw-markup))))
-
-(defn comment-list [app opts]
-  (om/component
-   (dom/div #js {:className "commentList"}
-            (into-array
-             (map #(om/build comment app
-                             {:path [:comments %]
-                              :key :id})
-                  (range (count (:comments app))))))))
-
-(defn save-comment!
-  [comment app opts]
-  (do (om/update! app [:comments]
-                  (fn [comments] (conj comments (assoc comment :id (guid)))))))
-
-(defn handle-submit
-  [e app owner opts]
-  (let [[author author-node] (value-from-node owner "author")
-        [text text-node]     (value-from-node owner "text")]
-    (when (and author text)
-      (save-comment! {:author author :text text} app opts)
-      (clear-nodes! author-node text-node))
-    false))
-
-(defn comment-form
-  [app opts]
-  (reify
-    om/IRender
-    (render [_ owner]
-      (dom/form
-       #js {:className "commentForm" :onSubmit #(handle-submit % app owner opts)}
-       (dom/input #js {:type "text" :placeholder "Your Name" :ref "author"})
-       (dom/input #js {:type "text" :placeholder "Say something..." :ref "text"})
-       (dom/input #js {:type "submit" :value "Post"})))))
-
-(defn comment-box [app opts]
-  (reify
-    om/IInitState
-    (init-state [_ owner]
-      (om/update! app #(assoc % :comments [])))
-    om/IRender
-    (render [_ owner]
-      (dom/div
-       #js {:className "commentBox"}
-       (dom/h1 nil "Comments")
-       (om/build comment-list app)
-       (om/build comment-form app {:opts opts})))))
-
 (defn get-layer [app name]
   (first (filter #(= name (:name %)) (:layers app))))
 
 (defn columns [features]
   (into #{} (apply concat (map keys features))))
+
+(defn select-layer [app layer]
+  (om/update! app [:selection :layer]
+              (constantly layer)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; UI helpers
 
 (defn feature-row [feature cols]
   (dom/tr nil
@@ -125,10 +52,6 @@
                           (dom/tbody nil (into-array
                                            (map #(feature-row % cols) features))))))))
 
-(defn select-layer [app layer]
-  (om/update! app [:selection :layer]
-              (constantly layer)))
-
 (defn layer
   [app {{:keys [name]} :layer}]
   (let [selected (= name (:layer (:selection app)))]
@@ -143,6 +66,15 @@
                            (map #(om/build layer app {:opts {:layer %}})
                                 (:layers app)))))))
 
+(defn map-view [app]
+  (reify
+    om/IDidMount
+    (did-mount [_ _ _]
+      (let [map (L.mapbox.map "map" "imthepusher.gjbmo715")]))
+    om/IRender
+    (render [_ owner]
+      (dom/div #js {:id "map"}))))
+
 (defn carto-crayon-ui [app]
   (reify
     om/IRender
@@ -154,7 +86,6 @@
                         (om/build feature-table app)
                         (dom/div #js {:id "styles"}
                                  (dom/h2 nil "Styles")))
-               (dom/div #js {:id "map"}
-                        (dom/h2 nil "Map"))))))
+               (om/build map-view app)))))
 
 (om/root app-state carto-crayon-ui (.getElementById js/document "app"))
