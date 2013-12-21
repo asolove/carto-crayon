@@ -9,6 +9,7 @@
                  [org.clojure/core.async "0.1.267.0-0d7780-alpha"]
                  [secretary "0.4.0"]
                  [markdown-clj "0.9.36"]
+                 [cljs-http "0.1.2"]
                  [om "0.1.0-SNAPSHOT"]]
 
   :plugins [[lein-cljsbuild "1.0.0"]]
@@ -21,7 +22,7 @@
                                    :output-dir "resources/public/js/out"
                                    :optimizations :none
                                    :source-map true
-                                   :externs ["om/externs/react.js"]}}
+                                   :externs ["om/externs/react.js" "lib/topojson.js"]}}
                        {:id "release"
                         :source-paths ["src"]
                         :compiler {
@@ -31,6 +32,6 @@
                                    :pretty-print false
                                    :output-wrapper false
                                    :preamble ["om/react.min.js"]
-                                   :externs ["om/externs/react.js"]
+                                   :externs ["om/externs/react.js" "lib/topojson.js"]
                                    :closure-warnings
                                    {:non-standard-jsdoc :off}}}]})

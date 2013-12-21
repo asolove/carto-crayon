@@ -7,6 +7,7 @@
             [om.core :as om :include-macros true]
             [om.dom :as dom :include-macros true]
             [secretary.core :as secretary]
+            [cljs-http.client :as http]
             [carto-crayon.utils :refer [guid]])
   (:import [goog History]
            [goog.history EventType]))
@@ -18,14 +19,13 @@
 
 (def app-state
   (atom {:selection {:layer "States"}
-         :layers [{:name "Districts" :features [{:id "CA-1" :Obama 10 :Romney 20}]}
-                  {:name "States" :features [{:id "MN" :Obama 10 :Romney 14}]}]}))
+         :layers [{:name "States" :features [{:id "MN" :Obama 10 :Romney 14}]}]}))
 
 (defn get-layer [app name]
   (first (filter #(= name (:name %)) (:layers app))))
 
 (defn columns [features]
-  (into #{} (apply concat (map keys features))))
+  (disj (into #{} (apply concat (map keys features))) :geometry))
 
 (defn select-layer [app layer]
   (om/update! app [:selection :layer]
@@ -66,14 +66,22 @@
                            (map #(om/build layer app {:opts {:layer %}})
                                 (:layers app)))))))
 
+(def leaflet-map (atom false))
+
 (defn map-view [app]
   (reify
     om/IDidMount
     (did-mount [_ _ _]
-      (let [map (L.mapbox.map "map" "imthepusher.gjbmo715")]))
+      (swap! leaflet-map (fn [_] (L.mapbox.map "map" "imthepusher.gjbmo715"))))
+    ; FIXME: re-renders each time. Should make a declarative Leaflet bindings layer cf. https://github.com/facebook/react-art/blob/master/src/ReactART.js
     om/IRender
     (render [_ owner]
+      (when @leaflet-map
+        (let [features (get-in app [:layers 1 :features])]
+          (doseq [feature features]
+            (.addTo (L.geoJson (clj->js {:type "Feature" :geometry (:geometry feature)})) @leaflet-map))))
       (dom/div #js {:id "map"}))))
+
 
 (defn carto-crayon-ui [app]
   (reify
@@ -88,4 +96,17 @@
                                  (dom/h2 nil "Styles")))
                (om/build map-view app)))))
 
-(om/root app-state carto-crayon-ui (.getElementById js/document "app"))
+(def topology (atom 1))
+
+(go (let [districtTopology (js/JSON.parse (:body (<! (http/get "data/cd113.topojson"))))
+          districtGeoJSON (js/topojson.feature districtTopology (.-cd113 (.-objects districtTopology)))
+          ; convert everything but the geometry to edn
+          districtLayer { :name "Districts"
+                          :features (vec (.map (.-features districtGeoJSON)
+                                               (fn [f] {:id (.-id f) :geometry (.-geometry f)})))}]
+      (swap! topology (constantly districtTopology))
+      (swap! app-state (fn [state]
+                         (update-in state [:layers]
+                                    #(conj % districtLayer))))
+      (om/root app-state carto-crayon-ui (.getElementById js/document "app"))))
+
