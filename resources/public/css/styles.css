@@ -73,7 +73,7 @@ h2 {
 }
 
 #layers li {
-    padding:3px 6px;
+    padding: 3px 6px;
 	border: 1px solid transparent;
     border-radius: 2px;
     cursor: pointer;
@@ -95,6 +95,17 @@ thead td, thead th {
     color: #999;
     font-weight: bold;
     border-bottom: 1px solid #ddd;
+}
+
+tbody tr th, tbody tr td {
+    padding: 3px 6px;
+    border: 1px solid #ddd;
+    border-width: 0px 1px 1px 0px;
+}
+
+tr.selected th, tr.selected td {
+    background-color: #cef;
+    border-color: #bde;
 }
 
 /* styles */
