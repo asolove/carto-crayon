@@ -24,22 +24,39 @@
 (defn get-layer [app name]
   (first (filter #(= name (:name %)) (:layers app))))
 
+(defn get-feature [layer id]
+  (first (filter #(= id (:id %)) (:features layer))))
+
+(defn selected-layer [app]
+  (get-layer app (get-in app [:selection :layer])))
+
+(defn selected-feature [app]
+  (let [layer (selected-layer app)]
+    (when layer
+      (get-feature layer (get-in app [:selection :feature])))))
+
 (defn columns [features]
   (disj (into #{} (apply concat (map keys features))) :geometry))
 
 (defn select-layer [app layer]
-  (om/update! app [:selection :layer]
-              (constantly layer)))
+  (om/update! app [:selection]
+              #(merge % {:layer layer :feature nil})))
+
+(defn select-feature [app feature]
+  (print "selecting feature!" feature)
+  (om/update! app [:selection :feature]
+              (constantly feature)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; UI helpers
 
-(defn feature-row [feature cols]
-  (dom/tr nil
+(defn feature-row [feature cols app]
+  (dom/tr #js {:onClick #(select-feature app (:id feature))
+               :className (when (= (:id feature) (get-in app [:selection :feature])) "selected")}
           (into-array (map #(dom/td nil (feature %)) cols))))
 
-(defn feature-table [app options]
-  (let [layer (get-layer app (:layer (:selection app)))
+(defn features-table [app options]
+  (let [layer (selected-layer app)
         features (:features layer)
         cols (columns features)]
     (om/component
@@ -50,7 +67,7 @@
                                                  (into-array
                                                    (map #(dom/th nil (name %)) cols))))
                           (dom/tbody nil (into-array
-                                           (map #(feature-row % cols) features))))))))
+                                           (map #(feature-row % cols app) features))))))))
 
 (defn layer
   [app {{:keys [name]} :layer}]
@@ -66,6 +83,11 @@
                            (map #(om/build layer app {:opts {:layer %}})
                                 (:layers app)))))))
 
+(defn feature-style [feature]
+  (om/component
+    (dom/div #js {:id "styles"}
+             (dom/h2 nil "Styles")
+             (dom/h1 nil (str (:id feature))))))
 
 
 (def leaflet-map (atom false))
@@ -108,11 +130,13 @@
     (render [_ owner]
       (dom/div nil nil
                (dom/header #js {:className "auth"})
-               (dom/div #js {:id "data"}
-                        (om/build layer-list app)
-                        (om/build feature-table app)
-                        (dom/div #js {:id "styles"}
-                                 (dom/h2 nil "Styles")))
+
+               (let [feature (selected-feature app)]
+                 (dom/div #js {:id "data"}
+                          (om/build layer-list app)
+                          (om/build features-table app)
+                          (om/build feature-style feature)))
+
                (om/build map-view app)))))
 
 (def topology (atom 1))
