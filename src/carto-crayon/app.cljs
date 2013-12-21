@@ -19,7 +19,7 @@
 
 (def app-state
   (atom {:selection {:layer "States"}
-         :layers [{:name "States" :features [{:id "MN" :Obama 10 :Romney 14}]}]}))
+         :layers []}))
 
 (defn get-layer [app name]
   (first (filter #(= name (:name %)) (:layers app))))
@@ -66,21 +66,40 @@
                            (map #(om/build layer app {:opts {:layer %}})
                                 (:layers app)))))))
 
+
+
 (def leaflet-map (atom false))
+
+(defn map-feature [feature {:keys [group]}]
+  (let [feature-layer (L.geoJson (:geometry feature))]
+    (.addLayer group feature-layer)
+    (reify
+      om/IRender
+      (render [_ owner]
+        (.setStyle feature-layer (:style feature))
+        (dom/span nil "")))))
+
+(defn map-layer [layer]
+  (let [feature-group (L.featureGroup)]
+    (reify
+      om/IDidMount
+      (did-mount [_ _ _]
+        (js/setTimeout (fn [] (.addTo feature-group @leaflet-map)) 100))
+      om/IRender
+      (render [_ owner]
+        (dom/div nil
+                 (into-array (map #(om/build map-feature % {:opts {:group feature-group}})
+                                  (:features layer))))))))
 
 (defn map-view [app]
   (reify
     om/IDidMount
     (did-mount [_ _ _]
       (swap! leaflet-map (fn [_] (L.mapbox.map "map" "imthepusher.gjbmo715"))))
-    ; FIXME: re-renders each time. Should make a declarative Leaflet bindings layer cf. https://github.com/facebook/react-art/blob/master/src/ReactART.js
     om/IRender
     (render [_ owner]
-      (when @leaflet-map
-        (let [features (get-in app [:layers 1 :features])]
-          (doseq [feature features]
-            (.addTo (L.geoJson (clj->js {:type "Feature" :geometry (:geometry feature)})) @leaflet-map))))
-      (dom/div #js {:id "map"}))))
+      (dom/div #js {:id "map"}
+               (into-array (map #(om/build map-layer %) (:layers app)))))))
 
 
 (defn carto-crayon-ui [app]
