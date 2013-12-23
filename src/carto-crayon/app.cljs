@@ -15,36 +15,48 @@
          :layers []}))
 
 (defn columns [features]
-  (disj (into #{} (apply concat (map keys features))) :geometry))
+  (disj (into #{} (apply concat (map keys features))) :geometry :styles :selected))
 
 (defn select-layer [app layer]
   (om/update! app [:selected] (constantly layer)))
 
 (defn select-feature [layer feature]
-  (om/update! layer [:selection]
-              (constantly feature)))
+  (om/update! layer [:features] (fn [features]
+                                  (vec (map #((if (= % feature) assoc dissoc) % :selected true) features)))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; UI helpers
+;; Components
 
-(defn feature-row [layer {:keys [cols n]}]
-  (let [feature (get-in layer [:features n])
-        selected (= (:selected layer) n)]
-    (om/component
-     (dom/tr #js {:onClick #(select-feature layer n)
-                  :className (when selected "selected")}
-             (into-array (map #(dom/td nil (feature %)) cols))))))
+; Layer List
 
-(defn feature-style [feature])
-
-(defn feature-styles [feature]
+(defn layer-list-item
+  [app {:keys [n]}]
   (om/component
-    (dom/div #js {:id "styles"}
-             (dom/h2 nil "Styles")
-             (dom/div nil
-                      (into-array
-                        (map #(om/build feature-style {:opts {:feature feature :style (key %)}})
-                             (:styles feature)))))))
+    (let [layer (get-in app [:layers n])
+          selected (= n (:selected app))]
+      (dom/li #js {:className (when selected "selected") :onClick #(select-layer app n)}
+              (:name layer)))))
+
+(defn layer-list [app]
+  (om/component
+    (let [selected (:selected app)]
+      (dom/div #js {:id "layers"}
+               (dom/h2 nil "Layers")
+               (dom/ol nil (into-array
+                             (map #(om/build layer-list-item
+                                             app
+                                             {:opts {:n %}})
+                                  (range (count (:layers app))) )))))))
+
+; Feature table
+(declare feature-styles)
+
+(defn feature-row [feature {:keys [cols select]}]
+  (om/component
+   (dom/tr #js {:onClick #(select feature)
+                :className (when (feature :selected) "selected")}
+           (into-array (map #(dom/td nil (feature %)) cols)))))
 
 (defn layer-features [layer opts]
   (om/component
@@ -62,29 +74,32 @@
                                      (dom/tbody nil (into-array
                                                      (map #(om/build feature-row
                                                                      layer
-                                                                     {:opts {:cols cols :n %}})
+                                                                     {:path [:features %]
+                                                                      :opts {:cols cols
+                                                                             :select (partial select-feature layer)}})
                                                           (range (count features)))))))
                         (dom/h2 nil "No layer")))
-             (om/build feature-styles layer {:path [:features (:selection layer)]}))))
+             (om/build feature-styles layer {:path [:features (:selected layer)]}))))
 
-(defn layer-list-item
-  [app {:keys [n]}]
-  (om/component
-    (let [layer (get-in app [:layers n])
-          selected (= n (:selected app))]
-      (dom/li #js {:className (if selected "selected" "not-selected") :onClick #(select-layer app n)}
-              (:name layer)))))
+; Styles
 
-(defn layer-list [app]
+(def default-styles {:fillColor "blue" :color "blue"})
+
+(defn feature-style [styles {:keys [prop]}]
+  (let [value (styles prop)]
+    (om/component
+     (dom/div nil
+              (dom/label nil (name prop))
+              (dom/input #js {:value value :onChange #(om/update! styles [prop] (constantly "red"))})))))
+
+(defn feature-styles [feature]
   (om/component
-    (let [selected (:selected app)]
-      (dom/div #js {:id "layers"}
-               (dom/h2 nil "Layers")
-               (dom/ol nil (into-array
-                             (map #(om/build layer-list-item
-                                             app
-                                             {:opts {:n %}})
-                                  (range (count (:layers app))) )))))))
+    (dom/div #js {:id "styles"}
+             (dom/h2 nil "Styles")
+             (dom/div nil
+                      (into-array
+                       (map #(om/build feature-style feature {:path [:styles] :opts {:prop (key %)}})
+                            (:styles feature)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Map UI
@@ -92,13 +107,16 @@
 (def leaflet-map (atom false))
 
 (defn map-feature [feature {:keys [group]}]
-  (let [feature-layer (L.geoJson (:geometry feature))]
-    (.addLayer group feature-layer)
-    (reify
-      om/IRender
-      (render [_ owner]
-        (.setStyle feature-layer (:style feature))
-        (dom/span nil "")))))
+  (reify
+    om/IWillMount
+    (will-mount [_ owner]
+      (let [feature-layer (L.geoJson (:geometry feature))]
+        (.addLayer group feature-layer)
+        (om/set-state! owner [:feature-layer] (L.geoJson (:geometry feature)))))
+    om/IRender
+    (render [_ owner]
+      (.setStyle (om/get-state owner [:feature-layer]) (clj->js (:styles feature)))
+      (dom/span nil ""))))
 
 (defn map-layer [layer]
   (let [feature-group (L.featureGroup)]
@@ -109,10 +127,10 @@
       om/IRender
       (render [_ owner]
         (dom/div nil
-                 (into-array (map #(om/build map-feature % {:opts {:group feature-group}})
-                                  (:features layer))))))))
+                 (into-array (map #(om/build map-feature layer {:path [:features %] :opts { :group feature-group}})
+                                  (range (count (:features layer))))))))))
 
-(defn map-view [app]
+(defn map-view [layers]
   (reify
     om/IDidMount
     (did-mount [_ _ _]
@@ -120,7 +138,8 @@
     om/IRender
     (render [_ owner]
       (dom/div #js {:id "map"}
-               (into-array (map #(om/build map-layer %) (:layers app)))))))
+               (into-array (map #(om/build map-layer layers {:path [%]})
+                                (range (count layers))))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -137,7 +156,7 @@
                         (om/build layer-list app)
                         (om/build layer-features app {:path [:layers (:selected app)]}))
 
-               (om/build map-view app)))))
+               (om/build map-view app {:path [:layers]})))))
 
 ; Load initial data
 (go (let [districtTopology (js/JSON.parse (:body (<! (http/get "data/cd113.topojson"))))
@@ -145,7 +164,9 @@
           ; convert everything but the geometry to edn
           districtLayer { :name "Districts"
                           :features (vec (.map (.-features districtGeoJSON)
-                                               (fn [f] {:id (.-id f) :geometry (.-geometry f)})))}]
+                                               (fn [f] {:id (.-id f)
+                                                       :geometry (.-geometry f)
+                                                       :styles (merge default-styles (js->clj (.-styles f)))})))}]
       (swap! app-state (fn [state]
                          (update-in state [:layers]
                                     #(conj % districtLayer))))
