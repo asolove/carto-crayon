@@ -7,6 +7,17 @@
 
 (enable-console-print!)
 
+; util, move
+(defn filter-indexed
+  [f col]
+  (filter #(= (val %) true)
+          (map-indexed (fn [idx item] [idx (f item)]) col)))
+
+(defn first-match-index
+  [f col]
+  (when-let [items (filter-indexed f col)]
+    (first (first items))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Data
 
@@ -79,7 +90,9 @@
                                                                              :select (partial select-feature layer)}})
                                                           (range (count features)))))))
                         (dom/h2 nil "No layer")))
-             (om/build feature-styles layer {:path [:features (:selected layer)]}))))
+             (print "rendering styles for" (first-match-index :selected (:features layer)))
+             (om/build feature-styles layer
+                       {:path [:features (first-match-index :selected (:features layer))]}))))
 
 ; Styles
 
@@ -95,7 +108,7 @@
 (defn feature-styles [feature]
   (om/component
     (dom/div #js {:id "styles"}
-             (dom/h2 nil "Styles")
+             (dom/h2 nil (str "Styles" (:id feature)))
              (dom/div nil
                       (into-array
                        (map #(om/build feature-style feature {:path [:styles] :opts {:prop (key %)}})
@@ -107,30 +120,45 @@
 (def leaflet-map (atom false))
 
 (defn map-feature [feature {:keys [group]}]
+  (print "calling map-feature")
   (reify
     om/IWillMount
     (will-mount [_ owner]
       (let [feature-layer (L.geoJson (:geometry feature))]
+        (aset js/top "layer" feature-layer)
         (.addLayer group feature-layer)
-        (om/set-state! owner [:feature-layer] (L.geoJson (:geometry feature)))))
+        (om/set-state! owner [:feature-layer] (L.geoJson (:geometry feature))))
+      (print "will mount" (aget (om/get-state owner [:feature-layer]) "_leaflet_id")))
+    om/IDidUpdate
+    (did-update [_ owner _ _ _]
+      (print "did update" (aget (om/get-state owner [:feature-layer]) "_leaflet_id"))
+      (.setStyle (om/get-state owner [:feature-layer]) (clj->js (:styles feature))))
+    om/IShouldUpdate
+    (should-update [this owner next-props next-state]
+      (print "did update" (aget (om/get-state owner [:feature-layer]) "_leaflet_id"))
+      (.setStyle (om/get-state owner [:feature-layer]) (clj->js (:styles feature))))
     om/IRender
     (render [_ owner]
-      (.setStyle (om/get-state owner [:feature-layer]) (clj->js (:styles feature)))
-      (dom/span nil ""))))
+      (print "render" (aget (om/get-state owner [:feature-layer]) "_leaflet_id"))
+      (dom/span nil (JSON/stringify (clj->js (:styles feature)))))))
 
 (defn map-layer [layer]
-  (let [feature-group (L.featureGroup)]
-    (reify
-      om/IDidMount
-      (did-mount [_ _ _]
-        (js/setTimeout (fn [] (.addTo feature-group @leaflet-map)) 100))
-      om/IRender
-      (render [_ owner]
-        (dom/div nil
-                 (into-array (map #(om/build map-feature layer {:path [:features %] :opts { :group feature-group}})
-                                  (range (count (:features layer))))))))))
+  (print "calling map-layer")
+  (reify
+    om/IWillMount
+    (will-mount [_ owner]
+      (om/set-state! owner [:feature-group] (L.featureGroup)))
+    om/IDidMount
+    (did-mount [_ owner _]
+      (js/setTimeout #(.addTo (om/get-state owner [:feature-group]) @leaflet-map) 100))
+    om/IRender
+    (render [_ owner]
+      (dom/div nil
+               (into-array (map #(om/build map-feature layer {:path [:features %] :opts {:group (om/get-state owner [:feature-group])}})
+                                (range (count (:features layer)))))))))
 
 (defn map-view [layers]
+  (print "calling map-view")
   (reify
     om/IDidMount
     (did-mount [_ _ _]
@@ -162,11 +190,11 @@
 (go (let [districtTopology (js/JSON.parse (:body (<! (http/get "data/cd113.topojson"))))
           districtGeoJSON (js/topojson.feature districtTopology (.-cd113 (.-objects districtTopology)))
           ; convert everything but the geometry to edn
-          districtLayer { :name "Districts"
-                          :features (vec (.map (.-features districtGeoJSON)
-                                               (fn [f] {:id (.-id f)
-                                                       :geometry (.-geometry f)
-                                                       :styles (merge default-styles (js->clj (.-styles f)))})))}]
+          districtLayer {:name "Districts"
+                         :features (vec (map (fn [f] {:id (.-id f)
+                                                     :geometry (.-geometry f)
+                                                     :styles (merge default-styles (js->clj (.-styles f)))})
+                                             (take 2 (vec (.-features districtGeoJSON)))))}]
       (swap! app-state (fn [state]
                          (update-in state [:layers]
                                     #(conj % districtLayer))))
