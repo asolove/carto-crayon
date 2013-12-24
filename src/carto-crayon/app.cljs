@@ -31,13 +31,31 @@
 (defn select-layer [app layer]
   (om/update! app [:selected] (constantly layer)))
 
-(defn select-feature [layer feature]
-  (om/update! layer [:features] (fn [features]
-                                  (vec (map #((if (= % feature) assoc dissoc) % :selected true) features)))))
+(defn select-features
+  ([layer f add]
+     (select-features layer (if add #(or (:selected %) (f %)) f)))
+  ([layer f]
+     (om/update! layer [:features] (fn [features]
+                                     (vec (map #((if (f %) assoc dissoc) % :selected true) features))))))
+
+(defn select-feature
+  ([layer feature add]
+     (select-features layer #{feature} add))
+  ([layer feature]
+     (select-features layer #{feature})))
+
+(defn select-all-features [layer]
+  (select-features layer (constantly true)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Components
+
+;; Dom helpers
+; FIXME: implement shift v. meta distinction
+(defn event-adds-to-selection?
+  [e]
+  (or (.-shiftKey e) (.-metaKey e)))
 
 ; Layer List
 
@@ -62,11 +80,10 @@
 
 ; Feature table
 (declare feature-styles)
-(declare empty-feature-styles)
 
 (defn feature-row [feature {:keys [cols select]}]
   (om/component
-   (dom/tr #js {:onClick #(select feature)
+   (dom/tr #js {:onClick #(select feature (event-adds-to-selection? %))
                 :className (when (feature :selected) "selected")}
            (into-array (map #(dom/td nil (feature %)) cols)))))
 
@@ -92,52 +109,76 @@
                                                           (range (count features)))))))
                         (dom/h2 nil "No layer")))
 
-             (if-let [feature-index (first-match-index :selected (:features layer))]
-               (om/build feature-styles layer {:path [:features feature-index]})
-               (om/build empty-feature-styles layer {:path [:features]})))))
+             (om/build feature-styles layer {:path [:features]}))))
 
 ; Styles
 
 (def default-styles {:fillColor "blue" :color "blue" :weight 5 :opacity 0.5 :fillOpacity 0.2})
 
-(defn feature-style [styles {:keys [prop]}]
-  (let [value (styles prop)]
-    (om/component
-     (dom/tr nil
-             (dom/th nil
-                     (dom/label #js {:for (str (name prop) "-field")} (name prop)))
-             (dom/td nil
-                     (dom/input #js {:id (str (name prop) "-field") :value value :onChange #(om/update! styles [prop] (constantly (.. % -target -value)))}))))))
+(defn update-selected-features-property
+  [features prop value]
+  (om/update! features (fn [fs]
+                         (vec (map (fn [f] (if (:selected f)
+                                            (assoc-in f [:styles prop] value)
+                                            f))
+                                   fs)))))
 
-(defn feature-styles [feature]
-  (om/component
-    (dom/div #js {:id "styles"}
-             (dom/h2 nil "Styles")
-             (dom/table nil
-                      (into-array
-                       (map #(om/build feature-style feature {:path [:styles] :opts {:prop (key %)}})
-                            (:styles feature)))))))
+(defn feature-style
+  [features [prop value]]
+  (let [field-name (str prop "-field")]
+    (dom/tr nil
+            (dom/th nil
+                    (dom/label #js {:htmlFor field-name} (name prop)))
+            (dom/td nil
+                    (dom/input #js {:id field-name
+                                    :value value
+                                    :onChange (fn [e] (update-selected-features-property
+                                                      features
+                                                      prop
+                                                      (.. e -target -value)))})))))
 
-(defn empty-feature-styles [features]
+(defn all-feature-styles [])
+
+(defn feature-styles [features]
   (om/component
-   (dom/div #js {:id "styles"}
-            (dom/h2 nil "Styles")
-            (dom/p nil "Select features to style"))))
+   (let [selected-features (filter :selected features)]
+     (dom/div #js {:id "styles"}
+              (dom/h2 nil "Styles")
+              (if (empty? selected-features)
+                (dom/p nil "Select features to style")
+                (dom/table nil
+                           (into-array
+                            (map #(feature-style features %)
+                                 ; fixme: get shared styles for all selected
+                                 (:styles (first selected-features))))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Map UI
 
+(defn resolve-styles [feature]
+  (let [styles (:styles feature)
+        ; resolvers here
+        resolved styles]
+    (clj->js resolved)))
+
 (defn map-feature [feature {:keys [group select]}]
   (reify
     om/IInitState
-    (init-state [a _]
+    (init-state [_ _]
       (let [feature-layer (L.geoJson (:geometry feature))]
-        (.on feature-layer "click" #(select feature))
+        (.on feature-layer "click" #(select feature (event-adds-to-selection? (.-originalEvent %))))
         (.addLayer group feature-layer)
         {:feature-layer feature-layer}))
     om/IDidUpdate
     (did-update [_ owner _ _ _]
-      (.setStyle (om/get-state owner [:feature-layer]) (clj->js (:styles feature))))
+      (.setStyle (om/get-state owner [:feature-layer]) (resolve-styles feature))
+      (.eachLayer (om/get-state owner [:feature-layer])
+                  (fn [layer]
+                    (when (.-_container layer)
+                      (let [classList (.. layer -_path -classList)]
+                        (if (:selected feature)
+                          (.add classList "selected")
+                          (.remove classList "selected")))))))
     om/IRender
     (render [_ owner]
       (dom/span nil nil))))
@@ -173,7 +214,7 @@
 
 (defn carto-crayon-ui [app]
   (om/component
-   (dom/div nil nil
+   (dom/div nil
             (dom/header #js {:className "auth"})
 
             (dom/div #js {:id "data"}
