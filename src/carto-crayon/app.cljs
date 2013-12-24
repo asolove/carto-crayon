@@ -127,8 +127,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Map UI
 
-(def leaflet-map (atom false))
-
 (defn map-feature [feature {:keys [group select]}]
   (reify
     om/IInitState
@@ -144,16 +142,15 @@
     (render [_ owner]
       (dom/span nil nil))))
 
-(defn map-layer [layer]
+(defn map-layer [layer {:keys [leaflet-map]}]
   (reify
     om/IInitState
     (init-state [_ _]
       {:feature-group (L.featureGroup)})
-    om/IDidMount
-    (did-mount [_ owner _]
-      (js/setTimeout #(.addTo (om/get-state owner [:feature-group]) @leaflet-map) 100))
     om/IRender
     (render [_ owner]
+      (when leaflet-map
+        (js/setTimeout #(.addTo (om/get-state owner [:feature-group]) leaflet-map) 100))
       (dom/div nil
                (into-array (map #(om/build map-feature layer {:path [:features %] :opts {:group (om/get-state owner [:feature-group])
                                                                                          :select (partial select-feature layer)}})
@@ -162,12 +159,12 @@
 (defn map-view [layers]
   (reify
     om/IDidMount
-    (did-mount [_ _ _]
-      (swap! leaflet-map (fn [_] (L.mapbox.map "map" "imthepusher.gjbmo715"))))
+    (did-mount [_ owner _]
+      (om/set-state! owner [:leaflet-map] (L.mapbox.map "map" "imthepusher.gjbmo715")))
     om/IRender
     (render [_ owner]
       (dom/div #js {:id "map"}
-               (into-array (map #(om/build map-layer layers {:path [%]})
+               (into-array (map #(om/build map-layer layers {:path [%] :opts {:leaflet-map (om/get-state owner [:leaflet-map])}})
                                 (range (count layers))))))))
 
 
