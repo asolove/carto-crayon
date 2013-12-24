@@ -116,7 +116,18 @@ tr.selected th, tr.selected td {
     vertical-align: baseline;
 }
 
+#styles th {
+    color: #999;
+    font-weight: bold;
+}
+
 #styles td {
-    padding: 2px 4px;
-    background-color: #eee;
+    padding: 0px;
+}
+
+#styles td input {
+    font: inherit;
+    border-width: 0px;
+    padding: 3px 6px;
+    width: 100px;
 }

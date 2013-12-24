@@ -62,6 +62,7 @@
 
 ; Feature table
 (declare feature-styles)
+(declare empty-feature-styles)
 
 (defn feature-row [feature {:keys [cols select]}]
   (om/component
@@ -90,39 +91,50 @@
                                                                              :select (partial select-feature layer)}})
                                                           (range (count features)))))))
                         (dom/h2 nil "No layer")))
-             (om/build feature-styles layer
-                       {:path [:features (first-match-index :selected (:features layer))]}))))
+
+             (if-let [feature-index (first-match-index :selected (:features layer))]
+               (om/build feature-styles layer {:path [:features feature-index]})
+               (om/build empty-feature-styles layer {:path [:features]})))))
 
 ; Styles
 
-(def default-styles {:fillColor "blue" :color "blue"})
+(def default-styles {:fillColor "blue" :color "blue" :weight 5 :opacity 0.5 :fillOpacity 0.2})
 
 (defn feature-style [styles {:keys [prop]}]
   (let [value (styles prop)]
     (om/component
-     (dom/div nil
-              (dom/label nil (name prop))
-              (dom/input #js {:value value :onChange #(om/update! styles [prop] (constantly (.. % -target -value)))})))))
+     (dom/tr nil
+             (dom/th nil
+                     (dom/label #js {:for (str (name prop) "-field")} (name prop)))
+             (dom/td nil
+                     (dom/input #js {:id (str (name prop) "-field") :value value :onChange #(om/update! styles [prop] (constantly (.. % -target -value)))}))))))
 
 (defn feature-styles [feature]
   (om/component
     (dom/div #js {:id "styles"}
-             (dom/h2 nil (str "Styles" (:id feature)))
-             (dom/div nil
+             (dom/h2 nil "Styles")
+             (dom/table nil
                       (into-array
                        (map #(om/build feature-style feature {:path [:styles] :opts {:prop (key %)}})
                             (:styles feature)))))))
+
+(defn empty-feature-styles [features]
+  (om/component
+   (dom/div #js {:id "styles"}
+            (dom/h2 nil "Styles")
+            (dom/p nil "Select features to style"))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Map UI
 
 (def leaflet-map (atom false))
 
-(defn map-feature [feature {:keys [group]}]
+(defn map-feature [feature {:keys [group select]}]
   (reify
     om/IInitState
     (init-state [a _]
       (let [feature-layer (L.geoJson (:geometry feature))]
+        (.on feature-layer "click" #(select feature))
         (.addLayer group feature-layer)
         {:feature-layer feature-layer}))
     om/IDidUpdate
@@ -130,7 +142,7 @@
       (.setStyle (om/get-state owner [:feature-layer]) (clj->js (:styles feature))))
     om/IRender
     (render [_ owner]
-      (dom/span nil (JSON/stringify (clj->js (:styles feature)))))))
+      (dom/span nil nil))))
 
 (defn map-layer [layer]
   (reify
@@ -143,7 +155,8 @@
     om/IRender
     (render [_ owner]
       (dom/div nil
-               (into-array (map #(om/build map-feature layer {:path [:features %] :opts {:group (om/get-state owner [:feature-group])}})
+               (into-array (map #(om/build map-feature layer {:path [:features %] :opts {:group (om/get-state owner [:feature-group])
+                                                                                         :select (partial select-feature layer)}})
                                 (range (count (:features layer)))))))))
 
 (defn map-view [layers]
@@ -181,7 +194,7 @@
                          :features (vec (map (fn [f] {:id (.-id f)
                                                      :geometry (.-geometry f)
                                                      :styles (merge default-styles (js->clj (.-styles f)))})
-                                             (take 2 (vec (.-features districtGeoJSON)))))}]
+                                             (vec (.-features districtGeoJSON))))}]
       (swap! app-state (fn [state]
                          (update-in state [:layers]
                                     #(conj % districtLayer))))
