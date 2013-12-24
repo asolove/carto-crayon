@@ -102,7 +102,7 @@
     (om/component
      (dom/div nil
               (dom/label nil (name prop))
-              (dom/input #js {:value value :onChange #(om/update! styles [prop] (constantly "red"))})))))
+              (dom/input #js {:value value :onChange #(om/update! styles [prop] (constantly (.. % -target -value)))})))))
 
 (defn feature-styles [feature]
   (om/component
