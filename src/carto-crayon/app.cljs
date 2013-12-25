@@ -40,9 +40,14 @@
 
 (defn select-feature
   ([layer feature add]
-     (select-features layer #{feature} add))
+     (select-features layer #(= (:id feature) (:id %)) add))
   ([layer feature]
-     (select-features layer #{feature})))
+     (select-features layer #(= (:id feature) (:id %)))))
+
+; fixme: remove?
+(defn select-feature-from-map
+  [layer feature add]
+  (select-feature layer feature add))
 
 (defn select-all-features [layer]
   (select-features layer (constantly true)))
@@ -82,10 +87,19 @@
 (declare feature-styles)
 
 (defn feature-row [feature {:keys [cols select]}]
-  (om/component
-   (dom/tr #js {:onClick #(select feature (event-adds-to-selection? %))
+  (reify
+    om/IRender
+    (render [_ owner]
+      (dom/tr #js {:onClick #(select feature (event-adds-to-selection? %))
                 :className (when (feature :selected) "selected")}
-           (into-array (map #(dom/td nil (feature %)) cols)))))
+              (into-array (map #(dom/td nil (feature %)) cols))))
+    om/IDidUpdate
+    (did-update [_ _ prev _ node]
+      (let [prev-props (.-__om_value prev)]
+        (if (and (:selected feature) (not (:selected prev-props)))
+          (aset (.getElementById js/document "features")
+                "scrollTop"
+                (.-offsetTop node)))))))
 
 (defn layer-features [layer opts]
   (om/component
@@ -194,7 +208,7 @@
         (js/setTimeout #(.addTo (om/get-state owner [:feature-group]) leaflet-map) 100))
       (dom/div nil
                (into-array (map #(om/build map-feature layer {:path [:features %] :opts {:group (om/get-state owner [:feature-group])
-                                                                                         :select (partial select-feature layer)}})
+                                                                                         :select (partial select-feature-from-map layer)}})
                                 (range (count (:features layer)))))))))
 
 (defn map-view [layers]
