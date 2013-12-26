@@ -33,24 +33,28 @@
 
 (defn select-features
   ([layer f add]
-     (select-features layer (if add #(or (:selected %) (f %)) f)))
-  ([layer f]
-     (om/update! layer [:features] (fn [features]
-                                     (vec (map #((if (f %) assoc dissoc) % :selected true) features))))))
+     (let [test (if add #(or (:selected %) (f %)) f)
+           op #(if (test %) assoc dissoc)]
+       (om/update! layer [:features]
+                   (fn [features]
+                     (vec (map #((op %) % :selected true) features)))))))
 
 (defn select-feature
   ([layer feature add]
-     (select-features layer #(= (:id feature) (:id %)) add))
+     (select-features layer #(= (:id feature) (:id %)) add)))
+
+(defn deselect-feature
+  [layer feature]
+  (om/update! layer [:features]
+              (fn [features]
+                (vec (map #(if (= (:id %) (:id feature)) (dissoc % :selected) %) features)))))
+
+(defn toggle-selection
   ([layer feature]
-     (select-features layer #(= (:id feature) (:id %)))))
-
-; fixme: remove?
-(defn select-feature-from-map
-  [layer feature add]
-  (select-feature layer feature add))
-
-(defn select-all-features [layer]
-  (select-features layer (constantly true)))
+     (select-features layer
+                      #(if (= (:id feature) (:id %))
+                         (not (:selected %))
+                         (:selected %)) false)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -86,6 +90,15 @@
 ; Feature table
 (declare feature-styles)
 
+(defn ensure-feature-visible
+  [node]
+  (let [parent (.getElementById js/document "features")
+        parent-top (.-scrollTop parent)
+        parent-bottom (+ parent-top (.-offsetHeight parent))
+        node-top (.-offsetTop node)]
+    (when (or (< node-top parent-top) (> node-top parent-bottom))
+      (aset parent "scrollTop" node-top))))
+
 (defn feature-row [feature {:keys [cols select]}]
   (reify
     om/IRender
@@ -97,9 +110,7 @@
     (did-update [_ _ prev _ node]
       (let [prev-props (.-__om_value prev)]
         (if (and (:selected feature) (not (:selected prev-props)))
-          (aset (.getElementById js/document "features")
-                "scrollTop"
-                (.-offsetTop node)))))))
+          (ensure-feature-visible node))))))
 
 (defn layer-features [layer opts]
   (om/component
@@ -119,7 +130,7 @@
                                                                      layer
                                                                      {:path [:features %]
                                                                       :opts {:cols cols
-                                                                             :select (partial select-feature layer)}})
+                                                                             :select (partial toggle-selection layer)}})
                                                           (range (count features)))))))
                         (dom/h2 nil "No layer")))
 
@@ -208,7 +219,7 @@
         (js/setTimeout #(.addTo (om/get-state owner [:feature-group]) leaflet-map) 100))
       (dom/div nil
                (into-array (map #(om/build map-feature layer {:path [:features %] :opts {:group (om/get-state owner [:feature-group])
-                                                                                         :select (partial select-feature-from-map layer)}})
+                                                                                         :select (partial toggle-selection layer)}})
                                 (range (count (:features layer)))))))))
 
 (defn map-view [layers]
