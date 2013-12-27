@@ -122,7 +122,7 @@ tr.selected th, tr.selected td {
 }
 
 /* styles */
-.swatch span {
+span.swatch {
     display: inline-block;
     width: .8em;
     height: .9em;

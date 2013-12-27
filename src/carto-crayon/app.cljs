@@ -36,11 +36,11 @@
                         (if add (:selected %) false))
                       false)))
 
-(defn set-feature-style
+(defn set-feature-style-text
   [features prop value]
   (om/update! features (fn [fs]
                          (vec (map (fn [f] (if (:selected f)
-                                            (assoc-in f [:styles prop] value)
+                                            (assoc-in f [:styles prop :text] value)
                                             f))
                                    fs)))))
 
@@ -128,21 +128,74 @@
 
 ; Styles
 
-(def default-styles {:fillColor "blue" :color "blue" :weight 5 :opacity 0.5 :fillOpacity 0.2})
+(def default-styles {:fillColor {:text "blue"}
+                     :color {:text "blue"}
+                     :weight {:text 1}
+                     :opacity {:text 0.5}
+                     :fillOpacity {:text  0.2}})
 
-(defn feature-style-row
-  [features [prop value]]
-  (let [field-name (str prop "-field")]
+(def style-types {:fillColor :color :color :color :weight :length
+                  :opacity :percent :fillOpacity :percent})
+
+(defn formula?
+  [config]
+  (= "=" (get-in config [:text 0])))
+
+(defn preview-color-config
+  [config features]
+  ; FIXME: handle complex case
+  (get config :text))
+
+(defn feature-color-row
+  [features [prop config]]
+  (let [field-name (str prop "-field")
+        bgColor (preview-color-config config features)
+        text (:text config)
+        summary (dom/tr nil
+                        (dom/th nil
+                                (dom/label #js {:htmlFor field-name} (name prop)))
+                        (dom/td nil
+                                (dom/input #js {:id field-name
+                                                :value text
+                                                :onChange (fn [e] (set-feature-style-text
+                                                                  features
+                                                                  prop
+                                                                  (.. e -target -value)))}))
+                        (dom/td nil
+                                (dom/span #js {:className "swatch" :style #js {:backgroundColor bgColor}}
+                                          " ")))]
+    (if (formula? config)
+      [summary
+       (dom/tr nil
+               (dom/td #js {:colSpan 3}
+                       (dom/input #js {} (:domain-min config))
+                       (dom/input #js {} (:domain-max config))
+                       (dom/span #js {:className "color-preview"})
+                       (dom/input #js {} (:range-min config))
+                       (dom/input #js {} (:range-max config))
+                       ))]
+      summary)))
+
+(defn feature-other-row
+  [features [prop config]]
+  (let [field-name (str prop "-field")
+        text (:text config)]
     (dom/tr nil
             (dom/th nil
                     (dom/label #js {:htmlFor field-name} (name prop)))
             (dom/td nil
                     (dom/input #js {:id field-name
-                                    :value value
-                                    :onChange (fn [e] (set-feature-style
+                                    :value text
+                                    :onChange (fn [e] (set-feature-style-text
                                                       features
                                                       prop
                                                       (.. e -target -value)))})))))
+
+(defn feature-style-row
+  [features [prop value]]
+  (if (= :color (style-types prop))
+    (feature-color-row features [prop value])
+    (feature-other-row features [prop value])))
 
 (defn feature-styles-list [features]
   (om/component
@@ -152,10 +205,10 @@
               (if (empty? selected-features)
                 (dom/p nil "Select features to style")
                 (dom/table nil
-                           (into-array
-                            (map #(feature-style-row features %)
-                                 ; FIXME: get styles for all selected features
-                                 (:styles (first selected-features))))))))))
+                           (into-array (flatten
+                                        (map #(feature-style-row features %)
+                                        ; FIXME: get styles for all selected features
+                                             (:styles (first selected-features)))))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Map UI
@@ -163,7 +216,7 @@
 (defn resolve-styles [feature]
   (let [styles (:styles feature)
         ; resolvers here
-        resolved styles]
+        resolved (into {} (map #(vec [(key %) (:text (val %))]) styles))]
     (clj->js resolved)))
 
 (defn map-feature [feature {:keys [group select]}]
@@ -244,5 +297,4 @@
           districtLayer {:name "Districts"
                          :features districtFeatures}]
       (let [init-state (update-in empty-state [:layers] #(vec (conj % districtLayer)))]
-        (print (:layers init-state))
         (om/root init-state carto-crayon-ui (.getElementById js/document "app")))))
