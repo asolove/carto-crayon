@@ -157,3 +157,7 @@ path.selected {
   50% { opacity: 0.3; }
   100% { opacity: 1.0; }
 }
+
+.hidden {
+    display: none;
+}

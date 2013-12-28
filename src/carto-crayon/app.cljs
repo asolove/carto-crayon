@@ -36,13 +36,17 @@
                         (if add (:selected %) false))
                       false)))
 
-(defn set-feature-style-text
-  [features prop value]
+(defn set-feature-style-config
+  [features style prop value]
   (om/update! features (fn [fs]
                          (vec (map (fn [f] (if (:selected f)
-                                            (assoc-in f [:styles prop :text] value)
+                                            (assoc-in f [:styles style prop] value)
                                             f))
                                    fs)))))
+
+(defn set-feature-style-text
+  [features style text]
+  (set-feature-style-config features style :text text))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; DOM helpers
@@ -139,12 +143,14 @@
 
 (defn formula?
   [config]
-  (= "=" (get-in config [:text 0])))
+  (= "=" (get (:text config) 0)))
 
 (defn preview-color-config
   [config features]
   ; FIXME: handle complex case
   (get config :text))
+
+
 
 (defn feature-color-row
   [features [prop config]]
@@ -164,17 +170,17 @@
                         (dom/td nil
                                 (dom/span #js {:className "swatch" :style #js {:backgroundColor bgColor}}
                                           " ")))]
-    (if (formula? config)
-      [summary
-       (dom/tr nil
+    [summary
+     (let [input #(dom/input #js {:value (% config) :onChange (fn [e] (set-feature-style-config features prop % (.. e -target -value)))})]
+       (dom/tr #js {:className (when (not (formula? config)) "hidden")}
                (dom/td #js {:colSpan 3}
-                       (dom/input #js {} (:domain-min config))
-                       (dom/input #js {} (:domain-max config))
+
+                       (input :domain-min)
+                       (input :domain-max)
                        (dom/span #js {:className "color-preview"})
-                       (dom/input #js {} (:range-min config))
-                       (dom/input #js {} (:range-max config))
-                       ))]
-      summary)))
+                       (input :range-min)
+                       (input :range-max))))]
+    ))
 
 (defn feature-other-row
   [features [prop config]]
@@ -213,10 +219,16 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Map UI
 
+(defn resolve-style
+  [feature [style config]]
+  (if (formula? config)
+    [style (:range-min config)]
+    [style (:text config)]))
+
 (defn resolve-styles [feature]
   (let [styles (:styles feature)
         ; resolvers here
-        resolved (into {} (map #(vec [(key %) (:text (val %))]) styles))]
+        resolved (into {} (map (partial resolve-style feature) styles))]
     (clj->js resolved)))
 
 (defn map-feature [feature {:keys [group select]}]
