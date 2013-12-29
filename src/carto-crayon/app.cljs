@@ -136,7 +136,7 @@
                      :color {:text "blue"}
                      :weight {:text 1}
                      :opacity {:text 0.5}
-                     :fillOpacity {:text  0.2}})
+                     :fillOpacity {:text 0.2}})
 
 (def style-types {:fillColor :color :color :color :weight :length
                   :opacity :percent :fillOpacity :percent})
@@ -145,17 +145,36 @@
   [config]
   (= "=" (get (:text config) 0)))
 
-(defn preview-color-config
-  [config features]
-  ; FIXME: handle complex case
-  (get config :text))
+(defn style-scale
+  [config]
+  (fn [value]
+    (let [domain-size (- (:domain-max config) (:domain-min config))
+          scaled-value (min 1 (max 0 (/ (- value (:domain-min config)) domain-size)))
+          color (js/Chromath.towards (:range-min config) (:range-max config) scaled-value)]
+      (when color (print scaled-value (.toRGBAString color)))
+      (when color (.toRGBAString color)))))
 
+(defn eval
+  [config feature]
+  ; FIXME: real formula grammar, for now just prop name
+  (let [formula (keyword (.substr (:text config) 1))]
+    (get feature formula)))
+
+(defn style-value
+  [config feature]
+  (if (formula? config)
+    (let [scale (style-scale config)
+          val (eval config feature)]
+      (js/eval "debugger")
+      (scale val))
+    (:text config)))
 
 
 (defn feature-color-row
   [features [prop config]]
   (let [field-name (str prop "-field")
-        bgColor (preview-color-config config features)
+        ; fixme: preview for multiple features with gradient?
+        bgColor (style-value config (first features))
         text (:text config)
         summary (dom/tr nil
                         (dom/th nil
@@ -221,9 +240,7 @@
 
 (defn resolve-style
   [feature [style config]]
-  (if (formula? config)
-    [style (:range-min config)]
-    [style (:text config)]))
+  [style (style-value config feature)])
 
 (defn resolve-styles [feature]
   (let [styles (:styles feature)
@@ -302,6 +319,7 @@
           districtGeoJSON (js/topojson.feature districtTopology
                                                (.-cd113 (.-objects districtTopology)))
           districtFeatures (vec (map (fn [f] {:id (.-id f)
+                                             :thing 20
                                              :geometry (.-geometry f)
                                              :styles (merge default-styles
                                                             (js->clj (.-styles f)))})
