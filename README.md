@@ -8,10 +8,10 @@ CartoCrayon is in very early development: you probably don't want to use it yet.
 
 # Roadmap
 
-- [ ] style features manually
-- [ ] style features using a color scale on one data property
-- [ ] style features using more complicated data expressions: math, geometric operations, etc.
-- [ ] import geojson from files, geojson.io, etc.
-- [ ] merge non-geographic data (csv, etc.) with common geographic datasets (states, countries, etc.)
-- [ ] configure your own OSM or Mapbox map as the base layer
-- [ ] layer operations, (e.g. given point data and outline, use Voronoi to generate polygon data)
+- ~~style features manually~~
+- ~~style features using a color scale on one data property~~
+- style features using more complicated data expressions: math, geometric operations, etc.
+- import geojson from files, geojson.io, etc.
+- merge non-geographic data (csv, etc.) with common geographic datasets (states, countries, etc.)
+- configure your own OSM or Mapbox map as the base layer
+- layer operations, (e.g. given point data and outline, use Voronoi to generate polygon data)
