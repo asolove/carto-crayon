@@ -7,40 +7,77 @@
 
 (enable-console-print!)
 
-; util, move
-(defn filter-indexed
-  [f col]
-  (filter #(= (val %) true)
-          (map-indexed (fn [idx item] [idx (f item)]) col)))
-
-(defn first-match-index
-  [f col]
-  (when-let [items (filter-indexed f col)]
-    (first (first items))))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Data
 
-(def app-state
-  (atom {:selected false
-         :layers []}))
+(def empty-state
+  {:selected false
+   :layers []})
 
 (defn columns [features]
-  (disj (into #{} (apply concat (map keys features))) :geometry :styles :selected))
+  (disj (into #{} (apply concat (map #(keys (:properties %)) features)))))
 
 (defn select-layer [app layer]
   (om/update! app [:selected] (constantly layer)))
 
-(defn select-feature [layer feature]
-  (om/update! layer [:features] (fn [features]
-                                  (vec (map #((if (= % feature) assoc dissoc) % :selected true) features)))))
+(defn select-features
+  ([layer f add]
+     (let [test (if add #(or (:selected %) (f %)) f)
+           op #(if (test %) assoc dissoc)]
+       (om/update! layer [:features]
+                   (fn [features]
+                     (vec (map #((op %) % :selected true) features)))))))
 
+(defn select-all-features
+  [layer]
+  (select-features layer (constantly true) true))
+
+(defn toggle-feature-selection
+  ([layer feature add]
+     (select-features layer
+                      #(if (= (:id feature) (:id %))
+                        (not (:selected %))
+                        (if add (:selected %) false))
+                      false)))
+
+(defn set-feature-style-config
+  [features style prop value]
+  (om/update! features (fn [fs]
+                         (vec (map (fn [f] (if (:selected f)
+                                            (assoc-in f [:styles style prop] value)
+                                            f))
+                                   fs)))))
+
+(defn set-feature-style-text
+  [features style text]
+  (set-feature-style-config features style :text text))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; DOM helpers
+
+; FIXME: implement shift v. meta distinction
+(defn event-adds-to-selection?
+  [e]
+  (or (.-shiftKey e) (.-metaKey e)))
+
+; FIXME: make table fixed-height, then this can be entirely generic
+(defn ensure-feature-visible
+  [node]
+  (let [parent (.getElementById js/document "features")
+        parent-top (.-scrollTop parent)
+        parent-bottom (+ parent-top (.-offsetHeight parent))
+        node-top (.-offsetTop node)]
+    (when (or (< node-top parent-top) (> node-top parent-bottom))
+      (aset parent "scrollTop" node-top))))
+
+(defn css-horizontal-gradient
+  [left right]
+  (str "-webkit-linear-gradient(left, " left ", " right ")"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Components
 
 ; Layer List
-
 (defn layer-list-item
   [app {:keys [n]}]
   (om/component
@@ -49,7 +86,7 @@
       (dom/li #js {:className (when selected "selected") :onClick #(select-layer app n)}
               (:name layer)))))
 
-(defn layer-list [app]
+(defn layers-list [app]
   (om/component
     (let [selected (:selected app)]
       (dom/div #js {:id "layers"}
@@ -61,19 +98,43 @@
                                   (range (count (:layers app))) )))))))
 
 ; Feature table
-(declare feature-styles)
-(declare empty-feature-styles)
+(declare feature-styles-list)
+
+(defn feature-cell [feature property]
+  (let [value (get-in feature [:properties property])
+        number (number? value)
+        formatted-value (if number (.toFixed value 2) value)
+        className (if number "number" "text")]
+    (dom/td #js {:className className} formatted-value)))
 
 (defn feature-row [feature {:keys [cols select]}]
-  (om/component
-   (dom/tr #js {:onClick #(select feature)
+  (reify
+    om/IRender
+    (render [_ owner]
+      (dom/tr #js {:onClick #(select feature (event-adds-to-selection? %))
                 :className (when (feature :selected) "selected")}
-           (into-array (map #(dom/td nil (feature %)) cols)))))
+              (into-array (concat
+                           [(dom/td nil (:id feature))]
+                           (map (partial feature-cell feature) cols)))))
+    om/IDidUpdate
+    (did-update [_ _ prev _ node]
+      (let [prev-props (.-__om_value prev)]
+        (if (and (:selected feature) (not (:selected prev-props)))
+          (ensure-feature-visible node))))))
 
-(defn layer-features [layer opts]
+(defn features-list [layer opts]
   (om/component
     (dom/div nil
              (dom/div #js {:id "features"}
+                      (if layer
+                        (dom/div #js {:className "select-all"}
+                                 (dom/input #js {:id "select-all-features"
+                                                 :type "checkbox"
+                                                 :value (every? :selected (:features layer))
+                                                 :onClick #(select-all-features layer)})
+                                 (dom/label #js {:htmlFor "select-all-features"}
+                                            "Select all features")))
+                      
                       (dom/h2 nil "Features")
 
                       (if layer
@@ -82,93 +143,200 @@
                           (dom/table nil
                                      (dom/thead nil (dom/tr nil
                                                             (into-array
-                                                             (map #(dom/th nil (name %)) cols))))
+                                                             (concat
+                                                              [(dom/th nil "id")]
+                                                              (map #(dom/th nil (name %)) cols)))))
                                      (dom/tbody nil (into-array
                                                      (map #(om/build feature-row
                                                                      layer
                                                                      {:path [:features %]
                                                                       :opts {:cols cols
-                                                                             :select (partial select-feature layer)}})
+                                                                             :select (partial toggle-feature-selection layer)}})
                                                           (range (count features)))))))
                         (dom/h2 nil "No layer")))
 
-             (if-let [feature-index (first-match-index :selected (:features layer))]
-               (om/build feature-styles layer {:path [:features feature-index]})
-               (om/build empty-feature-styles layer {:path [:features]})))))
+             (om/build feature-styles-list layer {:path [:features]}))))
 
 ; Styles
 
-(def default-styles {:fillColor "blue" :color "blue" :weight 5 :opacity 0.5 :fillOpacity 0.2})
+(def default-styles {:fillColor {:text "blue"}
+                     :color {:text "blue"}
+                     :weight {:text 1}
+                     :opacity {:text 0.5}
+                     :fillOpacity {:text 0.2}})
 
-(defn feature-style [styles {:keys [prop]}]
-  (let [value (styles prop)]
-    (om/component
-     (dom/tr nil
-             (dom/th nil
-                     (dom/label #js {:for (str (name prop) "-field")} (name prop)))
-             (dom/td nil
-                     (dom/input #js {:id (str (name prop) "-field") :value value :onChange #(om/update! styles [prop] (constantly (.. % -target -value)))}))))))
+(def style-types {:fillColor :color :color :color :weight :length
+                  :opacity :percent :fillOpacity :percent})
 
-(defn feature-styles [feature]
+(defn formula?
+  [config]
+  (= "=" (get (:text config) 0)))
+
+(defn style-scale
+  [config]
+  (fn [value]
+    (let [domain-size (- (:domain-max config) (:domain-min config))
+          scaled-value (min 1 (max 0 (/ (- value (:domain-min config)) domain-size)))
+          color (js/Chromath.towards (:range-min config) (:range-max config) scaled-value)]
+      (when (and color (not (string? color)))
+        (.toRGBAString color)))))
+
+(defn eval
+  [config feature]
+  ; FIXME: real formula grammar, for now just prop name
+  (let [formula (.substr (:text config) 1)]
+    (get-in feature [:properties formula])))
+
+(defn style-value
+  [config feature]
+  (if (formula? config)
+    (let [scale (style-scale config)
+          val (eval config feature)]
+      (scale val))
+    (:text config)))
+
+(defn feature-color-scale-input
+  [features style config prop]
+  (dom/input #js {:className (str "style-" (name prop))
+                  :value (prop config)
+                  :onChange (fn [e] (set-feature-style-config
+                                    features style prop
+                                    (.. e -target -value)))}))
+
+(defn feature-color-scale-row
+  [features style config]
+  (let [input #(feature-color-scale-input features style config %)]
+    (dom/tr #js {:className (str "color-scale " (when (not (formula? config)) "hidden"))}
+            (dom/td #js {:colSpan 3}
+                    (input :domain-min)
+                    (input :domain-max)
+                    (dom/span #js {:className "color-preview"
+                                   :style #js {:background
+                                               (css-horizontal-gradient
+                                                ((style-scale config) (:domain-min config))
+                                                ((style-scale config) (:domain-max config)))}})
+                    (input :range-min)
+                    (input :range-max)))))
+
+(defn feature-color-row
+  [features [prop config]]
+  (let [field-name (str prop "-field")
+        ; fixme: preview for multiple features with gradient?
+        bgColor (style-value config (first features))
+        text (:text config)
+        summary (dom/tr nil
+                        (dom/th nil
+                                (dom/label #js {:htmlFor field-name} (name prop)))
+                        (dom/td nil
+                                (dom/input #js {:id field-name
+                                                :value text
+                                                :onChange (fn [e] (set-feature-style-text
+                                                                  features
+                                                                  prop
+                                                                  (.. e -target -value)))}))
+                        (dom/td nil
+                                (dom/span #js {:className "swatch" :style #js {:backgroundColor bgColor}} " ")))]
+    [summary
+     (feature-color-scale-row features prop config)]))
+
+(defn feature-other-row
+  [features [prop config]]
+  (let [field-name (str prop "-field")
+        text (:text config)]
+    (dom/tr nil
+            (dom/th nil
+                    (dom/label #js {:htmlFor field-name} (name prop)))
+            (dom/td nil
+                    (dom/input #js {:id field-name
+                                    :value text
+                                    :onChange (fn [e] (set-feature-style-text
+                                                      features
+                                                      prop
+                                                      (.. e -target -value)))})))))
+
+(defn feature-style-row
+  [features [prop value]]
+  (if (= :color (style-types prop))
+    (feature-color-row features [prop value])
+    (feature-other-row features [prop value])))
+
+(defn feature-styles-list [features]
   (om/component
-    (dom/div #js {:id "styles"}
-             (dom/h2 nil "Styles")
-             (dom/table nil
-                      (into-array
-                       (map #(om/build feature-style feature {:path [:styles] :opts {:prop (key %)}})
-                            (:styles feature)))))))
-
-(defn empty-feature-styles [features]
-  (om/component
-   (dom/div #js {:id "styles"}
-            (dom/h2 nil "Styles")
-            (dom/p nil "Select features to style"))))
+   (let [selected-features (filter :selected features)]
+     (dom/div #js {:id "styles"}
+              (dom/h2 nil "Styles")
+              (if (empty? selected-features)
+                (dom/p nil "Select features to style")
+                (dom/table nil
+                           (into-array (flatten
+                                        (map #(feature-style-row features %)
+                                        ; FIXME: get styles for all selected features
+                                             (:styles (first selected-features)))))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Map UI
 
-(def leaflet-map (atom false))
+(defn resolve-style
+  [feature [style config]]
+  [style (style-value config feature)])
+
+(defn resolve-styles [feature]
+  (let [styles (:styles feature)
+        ; resolvers here
+        resolved (into {} (map (partial resolve-style feature) styles))]
+    (clj->js resolved)))
 
 (defn map-feature [feature {:keys [group select]}]
   (reify
     om/IInitState
-    (init-state [a _]
+    (init-state [_ _]
       (let [feature-layer (L.geoJson (:geometry feature))]
-        (.on feature-layer "click" #(select feature))
+        (.on feature-layer "click" #(select feature (event-adds-to-selection? (.-originalEvent %))))
         (.addLayer group feature-layer)
         {:feature-layer feature-layer}))
     om/IDidUpdate
     (did-update [_ owner _ _ _]
-      (.setStyle (om/get-state owner [:feature-layer]) (clj->js (:styles feature))))
+      (.setStyle (om/get-state owner [:feature-layer]) (resolve-styles feature))
+      (.eachLayer (om/get-state owner [:feature-layer])
+                  (fn [layer]
+                    (when (.-_container layer)
+                      (let [classList (.. layer -_path -classList)]
+                        (if (:selected feature)
+                          (.add classList "selected")
+                          (.remove classList "selected")))))))
     om/IRender
     (render [_ owner]
       (dom/span nil nil))))
 
-(defn map-layer [layer]
+(defn map-layer [layer {:keys [leaflet-map]}]
   (reify
     om/IInitState
     (init-state [_ _]
       {:feature-group (L.featureGroup)})
-    om/IDidMount
-    (did-mount [_ owner _]
-      (js/setTimeout #(.addTo (om/get-state owner [:feature-group]) @leaflet-map) 100))
     om/IRender
     (render [_ owner]
+      (when leaflet-map
+        (js/setTimeout #(.addTo (om/get-state owner [:feature-group]) leaflet-map) 100))
       (dom/div nil
-               (into-array (map #(om/build map-feature layer {:path [:features %] :opts {:group (om/get-state owner [:feature-group])
-                                                                                         :select (partial select-feature layer)}})
-                                (range (count (:features layer)))))))))
+               (let [feature-group (om/get-state owner [:feature-group])
+                     select (partial toggle-feature-selection layer)]
+                 (into-array (map #(om/build map-feature layer
+                                             {:path [:features %]
+                                              :opts {:group feature-group :select select}})
+                                  (range (count (:features layer))))))))))
 
 (defn map-view [layers]
   (reify
     om/IDidMount
-    (did-mount [_ _ _]
-      (swap! leaflet-map (fn [_] (L.mapbox.map "map" "imthepusher.gjbmo715"))))
+    (did-mount [_ owner _]
+      (om/set-state! owner [:leaflet-map] (L.mapbox.map "map" "imthepusher.gjbmo715")))
     om/IRender
     (render [_ owner]
       (dom/div #js {:id "map"}
-               (into-array (map #(om/build map-layer layers {:path [%]})
-                                (range (count layers))))))))
+               (let [leaflet-map (om/get-state owner [:leaflet-map])]
+                 (into-array (map #(om/build map-layer layers
+                                             {:path [%] :opts {:leaflet-map leaflet-map}})
+                                  (range (count layers)))))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -176,27 +344,25 @@
 
 (defn carto-crayon-ui [app]
   (om/component
-   (dom/div nil nil
+   (dom/div nil
             (dom/header #js {:className "auth"})
 
             (dom/div #js {:id "data"}
-                     (om/build layer-list app)
-                     (om/build layer-features app {:path [:layers (:selected app)]}))
+                     (om/build layers-list app)
+                     (om/build features-list app {:path [:layers (:selected app)]}))
 
             (om/build map-view app {:path [:layers]}))))
 
-; Load initial data
-
-(go (let [districtTopology (js/JSON.parse (:body (<! (http/get "data/cd113.topojson"))))
-          districtGeoJSON (js/topojson.feature districtTopology (.-cd113 (.-objects districtTopology)))
-                                        ; convert everything but the geometry to edn
-          districtLayer {:name "Districts"
-                         :features (vec (map (fn [f] {:id (.-id f)
-                                                     :geometry (.-geometry f)
-                                                     :styles (merge default-styles (js->clj (.-styles f)))})
-                                             (vec (.-features districtGeoJSON))))}]
-      (swap! app-state (fn [state]
-                         (update-in state [:layers]
-                                    #(conj % districtLayer))))
-      (om/root app-state carto-crayon-ui (.getElementById js/document "app"))))
-
+(go (let [state-farms-geojson (js/JSON.parse (:body (<! (http/get "data/state_farms.geojson"))))
+          state-farms-features (vec (map (fn [f] {:id (.-id f)
+                                                 :geometry (.-geometry f)
+                                                 :properties (js->clj (.-properties f))
+                                                 :styles (merge default-styles
+                                                                (js->clj (.-styles f)))})
+                                         (vec (.-features state-farms-geojson))))
+          state-farms-layer {:name "Farms by state"
+                             :features state-farms-features}
+          mapbox-layer {:name "Mapbox: gjbmo715" :features []}]
+      (let [init-state (update-in empty-state [:layers]
+                                  #(vec (concat % [state-farms-layer mapbox-layer])))]
+        (om/root init-state carto-crayon-ui (.getElementById js/document "app")))))
