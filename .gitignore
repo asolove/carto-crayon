@@ -9,3 +9,5 @@ pom.xml
 .lein-deps-sum
 .iml
 .idea/
+node_modules
+.DS_Store

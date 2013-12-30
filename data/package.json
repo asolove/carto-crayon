@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "togeojson": "~0.4.2",
+    "fast-csv": "0.0.2",
+    "node-xml-lite": "0.0.3",
+    "dom-js": "0.0.9"
+  }
+}

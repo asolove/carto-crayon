@@ -161,3 +161,7 @@ path.selected {
 .hidden {
     display: none;
 }
+
+td.number {
+    text-align: right;
+}

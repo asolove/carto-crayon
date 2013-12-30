@@ -15,7 +15,9 @@
    :layers []})
 
 (defn columns [features]
-  (disj (into #{} (apply concat (map keys features))) :geometry :styles :selected))
+  (disj (into #{} (apply concat (map #(keys (:properties %)) features)))))
+
+
 
 (defn select-layer [app layer]
   (om/update! app [:selected] (constantly layer)))
@@ -27,6 +29,10 @@
        (om/update! layer [:features]
                    (fn [features]
                      (vec (map #((op %) % :selected true) features)))))))
+
+(defn select-all-features
+  [layer]
+  (select-features layer (constantly true) true))
 
 (defn toggle-feature-selection
   ([layer feature add]
@@ -93,13 +99,22 @@
 ; Feature table
 (declare feature-styles-list)
 
+(defn feature-cell [feature property]
+  (let [value (get-in feature [:properties property])
+        number (number? value)
+        formatted-value (if number (.toFixed value 2) value)
+        className (if number "number" "text")]
+    (dom/td #js {:className className} formatted-value)))
+
 (defn feature-row [feature {:keys [cols select]}]
   (reify
     om/IRender
     (render [_ owner]
       (dom/tr #js {:onClick #(select feature (event-adds-to-selection? %))
                 :className (when (feature :selected) "selected")}
-              (into-array (map #(dom/td nil (feature %)) cols))))
+              (into-array (concat
+                           [(dom/td nil (:id feature))]
+                           (map (partial feature-cell feature) cols)))))
     om/IDidUpdate
     (did-update [_ _ prev _ node]
       (let [prev-props (.-__om_value prev)]
@@ -111,6 +126,7 @@
     (dom/div nil
              (dom/div #js {:id "features"}
                       (dom/h2 nil "Features")
+                      (dom/button #js {:onClick #(select-all-features layer) :value "Select all"})
 
                       (if layer
                         (let [features (:features layer)
@@ -118,7 +134,9 @@
                           (dom/table nil
                                      (dom/thead nil (dom/tr nil
                                                             (into-array
-                                                             (map #(dom/th nil (name %)) cols))))
+                                                             (concat
+                                                              [(dom/th nil "id")]
+                                                              (map #(dom/th nil (name %)) cols)))))
                                      (dom/tbody nil (into-array
                                                      (map #(om/build feature-row
                                                                      layer
@@ -157,15 +175,16 @@
 (defn eval
   [config feature]
   ; FIXME: real formula grammar, for now just prop name
-  (let [formula (keyword (.substr (:text config) 1))]
-    (get feature formula)))
+  (let [formula (.substr (:text config) 1)]
+    (print (:properties feature))
+    (print formula (get-in feature [:properties formula]))
+    (get-in feature [:properties formula])))
 
 (defn style-value
   [config feature]
   (if (formula? config)
     (let [scale (style-scale config)
           val (eval config feature)]
-      (js/eval "debugger")
       (scale val))
     (:text config)))
 
@@ -315,16 +334,16 @@
 
             (om/build map-view app {:path [:layers]}))))
 
-(go (let [districtTopology (js/JSON.parse (:body (<! (http/get "data/cd113.topojson"))))
-          districtGeoJSON (js/topojson.feature districtTopology
-                                               (.-cd113 (.-objects districtTopology)))
-          districtFeatures (vec (map (fn [f] {:id (.-id f)
-                                             :thing 20
-                                             :geometry (.-geometry f)
-                                             :styles (merge default-styles
-                                                            (js->clj (.-styles f)))})
-                                     (vec (.-features districtGeoJSON))))
-          districtLayer {:name "Districts"
-                         :features districtFeatures}]
-      (let [init-state (update-in empty-state [:layers] #(vec (conj % districtLayer)))]
+(go (let [state-farms-geojson (js/JSON.parse (:body (<! (http/get "data/state_farms.geojson"))))
+          state-farms-features (vec (map (fn [f] {:id (.-id f)
+                                                 :geometry (.-geometry f)
+                                                 :properties (js->clj (.-properties f))
+                                                 :styles (merge default-styles
+                                                                (js->clj (.-styles f)))})
+                                         (vec (.-features state-farms-geojson))))
+          state-farms-layer {:name "Farms by state"
+                             :features state-farms-features}
+          mapbox-layer {:name "Mapbox: gjbmo715" :features []}]
+      (let [init-state (update-in empty-state [:layers]
+                                  #(vec (concat % [state-farms-layer mapbox-layer])))]
         (om/root init-state carto-crayon-ui (.getElementById js/document "app")))))
