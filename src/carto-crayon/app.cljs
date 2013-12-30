@@ -17,8 +17,6 @@
 (defn columns [features]
   (disj (into #{} (apply concat (map #(keys (:properties %)) features)))))
 
-
-
 (defn select-layer [app layer]
   (om/update! app [:selected] (constantly layer)))
 
@@ -72,6 +70,9 @@
     (when (or (< node-top parent-top) (> node-top parent-bottom))
       (aset parent "scrollTop" node-top))))
 
+(defn css-horizontal-gradient
+  [left right]
+  (str "-webkit-linear-gradient(left, " left ", " right ")"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Components
@@ -125,8 +126,16 @@
   (om/component
     (dom/div nil
              (dom/div #js {:id "features"}
+                      (if layer
+                        (dom/div #js {:className "select-all"}
+                                 (dom/input #js {:id "select-all-features"
+                                                 :type "checkbox"
+                                                 :value (every? :selected (:features layer))
+                                                 :onClick #(select-all-features layer)})
+                                 (dom/label #js {:htmlFor "select-all-features"}
+                                            "Select all features")))
+                      
                       (dom/h2 nil "Features")
-                      (dom/button #js {:onClick #(select-all-features layer) :value "Select all"})
 
                       (if layer
                         (let [features (:features layer)
@@ -169,15 +178,13 @@
     (let [domain-size (- (:domain-max config) (:domain-min config))
           scaled-value (min 1 (max 0 (/ (- value (:domain-min config)) domain-size)))
           color (js/Chromath.towards (:range-min config) (:range-max config) scaled-value)]
-      (when color (print scaled-value (.toRGBAString color)))
-      (when color (.toRGBAString color)))))
+      (when (and color (not (string? color)))
+        (.toRGBAString color)))))
 
 (defn eval
   [config feature]
   ; FIXME: real formula grammar, for now just prop name
   (let [formula (.substr (:text config) 1)]
-    (print (:properties feature))
-    (print formula (get-in feature [:properties formula]))
     (get-in feature [:properties formula])))
 
 (defn style-value
@@ -188,6 +195,28 @@
       (scale val))
     (:text config)))
 
+(defn feature-color-scale-input
+  [features style config prop]
+  (dom/input #js {:className (str "style-" (name prop))
+                  :value (prop config)
+                  :onChange (fn [e] (set-feature-style-config
+                                    features style prop
+                                    (.. e -target -value)))}))
+
+(defn feature-color-scale-row
+  [features style config]
+  (let [input #(feature-color-scale-input features style config %)]
+    (dom/tr #js {:className (str "color-scale " (when (not (formula? config)) "hidden"))}
+            (dom/td #js {:colSpan 3}
+                    (input :domain-min)
+                    (input :domain-max)
+                    (dom/span #js {:className "color-preview"
+                                   :style #js {:background
+                                               (css-horizontal-gradient
+                                                ((style-scale config) (:domain-min config))
+                                                ((style-scale config) (:domain-max config)))}})
+                    (input :range-min)
+                    (input :range-max)))))
 
 (defn feature-color-row
   [features [prop config]]
@@ -206,19 +235,9 @@
                                                                   prop
                                                                   (.. e -target -value)))}))
                         (dom/td nil
-                                (dom/span #js {:className "swatch" :style #js {:backgroundColor bgColor}}
-                                          " ")))]
+                                (dom/span #js {:className "swatch" :style #js {:backgroundColor bgColor}} " ")))]
     [summary
-     (let [input #(dom/input #js {:value (% config) :onChange (fn [e] (set-feature-style-config features prop % (.. e -target -value)))})]
-       (dom/tr #js {:className (when (not (formula? config)) "hidden")}
-               (dom/td #js {:colSpan 3}
-
-                       (input :domain-min)
-                       (input :domain-max)
-                       (dom/span #js {:className "color-preview"})
-                       (input :range-min)
-                       (input :range-max))))]
-    ))
+     (feature-color-scale-row features prop config)]))
 
 (defn feature-other-row
   [features [prop config]]

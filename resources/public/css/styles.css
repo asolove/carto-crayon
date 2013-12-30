@@ -121,6 +121,16 @@ tr.selected th, tr.selected td {
     cursor: pointer;
 }
 
+td.number {
+    text-align: right;
+}
+
+.select-all {
+    float: right;
+    font-size: 89%;
+    color: #999;
+}
+
 /* styles */
 span.swatch {
     display: inline-block;
@@ -136,6 +146,27 @@ span.swatch {
 
 #styles td {
     padding: 0px;
+}
+
+
+.color-preview {
+    display: block;
+    width: 100%;
+    height: 5px;
+}
+
+.color-scale {
+    background-color: #eee;
+}
+
+#styles .color-scale td input {
+    background: transparent;
+    margin: 3px 0px;
+} 
+
+#styles .color-scale td .style-range-max,
+#styles .color-scale td .style-domain-max {
+    text-align: right;
 }
 
 #styles td input {
@@ -160,8 +191,4 @@ path.selected {
 
 .hidden {
     display: none;
-}
-
-td.number {
-    text-align: right;
 }
